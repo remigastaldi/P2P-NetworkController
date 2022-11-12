@@ -67,9 +67,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
        2,
        2,
        2,
-       10,
+       2,
        5,
-       3,
+       8,
        30,
     ).await?;
 

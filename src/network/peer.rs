@@ -65,21 +65,21 @@ pub struct PeerController {
     out_connecting: u64,
     out_handshaking: u64,
     out_alive: u64,
-    handshaking: u64,
+    in_handshaking: u64,
     in_alive: u64,
     banned: u64
 }
 
 impl PeerController {
     fn new() -> Self {
-        PeerController { peers: HashMap::new(), idle: 0, out_connecting: 0, out_handshaking: 0, out_alive: 0, handshaking: 0, in_alive: 0, banned: 0 }
+        PeerController { peers: HashMap::new(), idle: 0, out_connecting: 0, out_handshaking: 0, out_alive: 0, in_handshaking: 0, in_alive: 0, banned: 0 }
     }
 
     // pub fn from<T>(peers_ips: T) -> Self
     //     where T: ExactSizeIterator + IntoIterator<Item = IP> {
     pub fn from(peers_ips: Vec<IP>) -> Self {
         let len = peers_ips.len() as u64;
-        PeerController { peers: peers_ips.into_iter().map(|peer_ip| (peer_ip, Peer::new())).collect::<HashMap::<IP, Peer>>(), idle: len, out_connecting: 0, out_handshaking: 0, out_alive: 0, handshaking: 0, in_alive: 0, banned: 0 }
+        PeerController { peers: peers_ips.into_iter().map(|peer_ip| (peer_ip, Peer::new())).collect::<HashMap::<IP, Peer>>(), idle: len, out_connecting: 0, out_handshaking: 0, out_alive: 0, in_handshaking: 0, in_alive: 0, banned: 0 }
     }
 
     // Abstraction of Status struct
@@ -132,7 +132,7 @@ impl PeerController {
     }
 
     pub fn simultaneous_incoming_connection_attempts(&self) -> u64 {
-        self.handshaking
+        self.in_handshaking
     }
 
     //TODO: replace those matches with a macro
@@ -145,7 +145,7 @@ impl PeerController {
                     Status::OutConnecting => self.out_connecting -= 1,
                     Status::OutHandshaking => self.out_handshaking -= 1,
                     Status::OutAlive => self.out_alive -= 1,
-                    Status::InHandshaking => self.handshaking -= 1,
+                    Status::InHandshaking => self.in_handshaking -= 1,
                     Status::InAlive => self.in_alive -= 1,
                     Status::Banned => self.banned -= 1,
                     Status::Local => todo!() 
@@ -159,7 +159,7 @@ impl PeerController {
             Status::OutConnecting => self.out_connecting += 1,
             Status::OutHandshaking => self.out_handshaking += 1,
             Status::OutAlive => self.out_alive += 1,
-            Status::InHandshaking => self.handshaking += 1,
+            Status::InHandshaking => self.in_handshaking += 1,
             Status::InAlive => self.in_alive += 1,
             Status::Banned => self.banned += 1,
             Status::Local => todo!(),
@@ -195,8 +195,16 @@ impl PeerController {
         self.peers.iter().map(|peer| peer.0).collect()
     } 
 
+    pub fn idle(&self) -> u64 {
+        self.idle
+    }
+
     pub fn out_connecting(&self) -> u64 {
         self.out_connecting
+    }
+
+    pub fn in_handshaking(&self) -> u64 {
+        self.in_handshaking
     }
 
     pub fn out_handshaking(&self) -> u64 {
@@ -205,10 +213,6 @@ impl PeerController {
 
     pub fn out_alive(&self) -> u64 {
         self.out_alive
-    }
-
-    pub fn handshaking(&self) -> u64 {
-        self.handshaking
     }
 
     pub fn in_alive(&self) -> u64 {

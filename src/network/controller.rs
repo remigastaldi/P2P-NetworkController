@@ -116,7 +116,7 @@ impl NetworkController {
                                                                         ]))))
         };
 
-        controller.start_listening_service(port, max_inc_connections, max_simultaneous_inc_connections).await?;
+        controller.start_listening_service(port).await?;
         controller.start_connection_service();
         controller.start_notifier_wakeup_service().await?;
         controller.start_peers_file_watcher_service(peers_file, peers_file_dump_interval);
@@ -229,18 +229,32 @@ impl NetworkController {
         });
     }
 
-    async fn start_listening_service(&mut self, port: u32, max_inc_connections: u64, max_simultaneous_inc_connections: u64) -> Result<(), Box<dyn Error>> {
+    async fn start_listening_service(&mut self, port: u32) -> Result<(), Box<dyn Error>> {
         let tx = self.channel.0.clone();
         let peers_controller = Arc::downgrade(&self.peers);
+        let notifier_service = Arc::downgrade(&self.notifier);
 
         let listener = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
         tokio::spawn(async move {
+            let notifier = notifier_service.upgrade().expect("start_listening_service: outlived network controller");
+            let controller = peers_controller.upgrade().expect("start_listening_service: outlived network controller");
+
             loop {
+                {
+                    let in_alive = controller.lock().await.in_alive();
+                    let mut tt = notifier.lock().await;
+                    if let Some(notify) = tt.check_limit(&NotifierEvent::MaxIncConnections, in_alive) {
+                    // if let Some(notify) = notifier.lock().await.check_limit(&NotifierEvent::MaxSimOutConnections, currently_out_co_hand) {
+                        drop(tt);
+                        notify.notified().await; 
+                    }
+                }
+
                 info!("Listening for new peers");
                 match listener.accept().await {
                     Ok((stream, addr)) => {
                             let ip = addr.ip().to_string();
-                            let controller = peers_controller.upgrade().expect("start_listening_service: outlived network controller");
+                            //TODO: add to peer list if not present
                             {
                                 let mut peers = controller.lock().await;
                                 if let Some(status) = peers.status(&ip) && status != Status::Idle {
@@ -251,6 +265,13 @@ impl NetworkController {
                                 if let Err(err) = peers.on_peer_connect(&ip) {
                                     error!("[{}] {}", ip, err);
                                     continue;
+                                }
+                                let in_handshaking = peers.in_handshaking();
+                                let mut tt = notifier.lock().await;
+                                if let Some(notify) = tt.check_limit(&NotifierEvent::MaxSimIncConnections, in_handshaking) {
+                                // if let Some(notify) = notifier.lock().await.check_limit(&NotifierEvent::MaxSimOutConnections, currently_out_co_hand) {
+                                    drop(tt);
+                                    notify.notified().await; 
                                 }
                             }
                             // let tx2 = tx.clone();
@@ -285,12 +306,12 @@ impl NetworkController {
                 for event in notifier.waiting_events() {
                     if match event {
                         NotifierEvent::TargetOutConnections => peers.out_alive() < *notifier.limits.get(&NotifierEvent::TargetOutConnections).unwrap(),
-                        NotifierEvent::MaxIncConnections => todo!(),
+                        NotifierEvent::MaxIncConnections => peers.in_alive() < *notifier.limits.get(&NotifierEvent::MaxIncConnections).unwrap(),
                         NotifierEvent::MaxSimOutConnections => peers.out_connecting() + peers.out_handshaking() < *notifier.limits.get(&NotifierEvent::MaxSimOutConnections).unwrap(),
-                        NotifierEvent::MaxSimIncConnections => todo!(),
-                        NotifierEvent::MaxIdlePeers => todo!(),
-                        NotifierEvent::MaxBannedPeers => todo!(),
-                    }{
+                        NotifierEvent::MaxSimIncConnections => peers.in_handshaking() < *notifier.limits.get(&NotifierEvent::MaxSimIncConnections).unwrap(), 
+                        NotifierEvent::MaxIdlePeers => peers.idle() < *notifier.limits.get(&NotifierEvent::MaxIdlePeers).unwrap(),
+                        NotifierEvent::MaxBannedPeers => peers.banned() < *notifier.limits.get(&NotifierEvent::MaxBannedPeers).unwrap()
+                    } {
                         notifier.wakeup(&event).await.unwrap();
                     }
                 }
