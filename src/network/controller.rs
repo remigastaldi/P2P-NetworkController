@@ -206,8 +206,6 @@ impl NetworkController {
                 controller.lock().await.on_peer_out_connecting(&ip).unwrap();
                 match TcpStream::connect(format!("{}:4242", &ip)).await {
                      Ok(stream) => {
-                        // let tx2 = tx.clone();
-                        // tokio::spawn(async move {
                             {
                                 controller.lock().await.on_peer_out_handshaking(&ip).unwrap();
                             }
@@ -215,7 +213,6 @@ impl NetworkController {
                                 error!("start_listening_service: Channel closed");
                                 controller.lock().await.on_peer_failed(&ip).unwrap();
                             }
-                        // });
                     },
                     Err(err) => {
                         error!("[{}] {:?}", ip, err);

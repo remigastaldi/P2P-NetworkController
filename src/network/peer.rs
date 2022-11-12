@@ -6,7 +6,6 @@ use tracing::{info, error, debug, Level, field::debug};
 
 pub type IP = String;
 
-#[derive(Serialize, Deserialize)]
 #[derive(Clone, Copy)]
 #[derive(PartialEq)]
 #[derive(Debug)]
@@ -21,12 +20,9 @@ pub enum Status {
     Local
 }
 
-#[derive(Serialize, Deserialize)]
 struct Peer {
    status: Status,
-   // #[serde(with = "ts_seconds_option")]
    last_alive: Option<DateTime<Utc>>,
-   // #[serde(with = "ts_seconds_option")]
    last_failure: Option<DateTime<Utc>>,
 }
 
