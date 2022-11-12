@@ -130,27 +130,33 @@ impl NetworkController {
     }
     
     fn start_peers_file_watcher_service(&self, mut peers_file: File, peers_file_dump_interval: u64) {
-        // let peers_controller = Arc::downgrade(&self.peers);
-        //
-        // tokio::spawn(async move {
-        //     loop {
-        //         let mut content = String::new();
-        //         peers_file.read_to_string(&mut content).unwrap();
-        //         let loc_peers: Vec<String> = serde_json::from_str(&content).unwrap();
-        //
-        //         let peers = peers.upgrade().expect("start_peers_file_watcher_service: outlived network controller");
-        //         // Naive search, can be optimised
-        //         for peer_ip in loc_peers {
-        //             if !peers.iter().any(|hot_peer| { &peer_ip == hot_peer }) {
-        //                 let peers_to_write = serde_json::to_string(&*peers).unwrap();
-        //                 info!("Update peers file");
-        //                 peers_file.write_all(peers_to_write.as_bytes()).unwrap();
-        //                 break; 
-        //             }
-        //         }
-        //         sleep(Duration::from_secs(peers_file_dump_interval)).await;
-        //     }
-        // });
+        let peers_controller = Arc::downgrade(&self.peers);
+
+        tokio::spawn(async move {
+            loop {
+                sleep(Duration::from_secs(peers_file_dump_interval)).await;
+
+                let mut content = String::new();
+                peers_file.rewind().unwrap();
+                peers_file.read_to_string(&mut content).unwrap();
+                let loc_peers: Vec<String> = serde_json::from_str(&content).unwrap();
+                
+                let peers = peers_controller.upgrade().expect("start_peers_file_watcher_service: outlived network controller");
+                let current_peers : Vec<IP> = {
+                    let l_peer_controller = peers.lock().await;
+                    l_peer_controller.peers_ip().iter().map(|&ip| ip.clone()).collect()
+                };
+                // Naive search, can be optimised
+                for peer_ip in loc_peers {
+                    if !current_peers.iter().any(|hot_peer| { &peer_ip == hot_peer }) {
+                        debug!("Updating local peers file");
+                        let peers_to_write = serde_json::to_string(&current_peers).unwrap();
+                        peers_file.write_all(peers_to_write.as_bytes()).unwrap();
+                        break; 
+                    }
+                }
+            }
+        });
     }
     
     fn start_connection_service(&mut self) {
@@ -274,13 +280,10 @@ impl NetworkController {
                                     notify.notified().await; 
                                 }
                             }
-                            // let tx2 = tx.clone();
-                            // tokio::spawn(async move {
-                                if (tx.send(NetworkControllerEvent::CandidateConnection(ip.clone(), stream, false)).await).is_err() {
-                                    error!("start_listening_service: Channel closed");
-                                    controller.lock().await.on_peer_failed(&ip).unwrap();
-                                }
-                            // });
+                            if (tx.send(NetworkControllerEvent::CandidateConnection(ip.clone(), stream, false)).await).is_err() {
+                                error!("start_listening_service: Channel closed");
+                                controller.lock().await.on_peer_failed(&ip).unwrap();
+                            }
                     },
                     Err(err) => error!("= {:?}", err)
                 }
@@ -349,6 +352,13 @@ impl NetworkController {
     }
 
     pub async fn feedback_peer_banned(&mut self, ip: &IP) -> Result<(), String> {
+        let peers = self.peers.lock().await;
+        let banned = peers.banned();
+        let mut tt = self.notifier.lock().await;
+        if tt.check_limit(&NotifierEvent::MaxBannedPeers, banned).is_some() {
+            drop(tt);
+            //TODO: drop banned peers
+        }
         self.peers.lock().await.feedback_peer_banned(ip) 
     }
     
