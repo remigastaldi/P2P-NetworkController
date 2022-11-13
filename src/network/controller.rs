@@ -8,9 +8,6 @@ use tokio::time::{sleep, Duration};
 use tokio::sync::Mutex; 
 use tracing::{info, error, debug, Level, field::debug};
 use local_ip_address::local_ip;
-// use serde_json::json;
-
-// #![feature(async_closure)]
 
 #[derive(Eq, Hash, PartialEq)]
 #[derive(Clone, Copy)]
@@ -104,7 +101,6 @@ impl NetworkController {
         //TODO: sort peers
         let mut controller = NetworkController{
             peers: Arc::new(Mutex::new(peer_controller)),
-            // peers: Arc::new(Mutex::new(loc_peers.into_iter().map(|peer_ip| (peer_ip, Peer::new())).collect())),
             channel: channel(4096),
             notifier: Arc::new(Mutex::new(NotifierService::new(HashMap::from([
                                                                              (NotifierEvent::TargetOutConnections, target_out_connections),
@@ -123,11 +119,11 @@ impl NetworkController {
         Ok(controller)
     }
 
-    fn peer_rank(ip: &str) -> u64 {
-        //TODO Rank algo
-
-        10
-    }
+    // fn peer_rank(ip: &str) -> u64 {
+    //     //TODO Rank algo
+    //
+    //     10
+    // }
     
     fn start_peers_file_watcher_service(&self, mut peers_file: File, peers_file_dump_interval: u64) {
         let peers_controller = Arc::downgrade(&self.peers);
@@ -169,7 +165,6 @@ impl NetworkController {
             loop {
                 let controller = peers_controller.upgrade().expect("start_listening_service: outlived network controller");
                 let notifier = notifier_service.upgrade().expect("start_listening_service: outlived network controller");
-                // info!("out_alive {}/{}", out_alive, target_out_connections);
 
                 let check_out_alive = async || {
                     let out_alive = controller.lock().await.out_alive();
@@ -263,7 +258,7 @@ impl NetworkController {
                             //TODO: add to peer list if not present
                             {
                                 let mut peers = controller.lock().await;
-                                if let Some(status) = peers.status(&ip) && status != Status::Idle {
+                                if let Some(status) = peers.peer_status(&ip) && status != Status::Idle {
                                     info!("[{}] peer already in {:?}", ip, status);
                                     continue;
                                 }
@@ -340,10 +335,12 @@ impl NetworkController {
         self.channel.1.recv().await.ok_or(String::from("wait_event: Channel closed"))
     }
 
-    pub async fn feedback_peer_alive(&mut self, ip: &IP, is_outgoing: bool) -> Result<(), String> {
-        match is_outgoing {
-            true => self.peers.lock().await.on_peer_out_alive(ip),
-            false => self.peers.lock().await.on_peer_in_alive(ip)
+    pub async fn feedback_peer_alive(&mut self, ip: &IP) -> Result<(), String> {
+        let peer_status = self.peers.lock().await.peer_status(ip).unwrap();
+        match peer_status {
+            Status::InAlive | Status::InHandshaking => self.peers.lock().await.on_peer_in_alive(ip),
+            Status::OutAlive | Status::OutHandshaking  => self.peers.lock().await.on_peer_out_alive(ip),
+            _ => Err(format!("Peer cannot switch from {:?} to Alive", peer_status))
         }
     }
     
@@ -364,5 +361,9 @@ impl NetworkController {
     
     pub async fn get_good_peer_ips(&self) -> Vec<IP> {
         self.peers.lock().await.best_peers()
+    }
+
+    pub async fn feedback_peer_list(&self, peer_ip: &Vec<IP>) {
+        //TODO: smart merge
     }
 }

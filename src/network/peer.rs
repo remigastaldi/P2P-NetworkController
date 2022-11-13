@@ -126,15 +126,7 @@ impl PeerController {
             }
         }
     }
-
-    pub fn incoming_connections(&self) -> u64 {
-        self.in_alive
-    }
-
-    pub fn simultaneous_incoming_connection_attempts(&self) -> u64 {
-        self.in_handshaking
-    }
-
+    
     //TODO: replace those matches with a macro
     fn update_peer_status(&mut self, ip: &IP, status: Status) -> Result<(), String> {
         match self.peers.get_mut(ip) {
@@ -183,7 +175,7 @@ impl PeerController {
         None
     }
 
-    pub fn status(&self, ip: &IP) -> Option<Status> {
+    pub fn peer_status(&self, ip: &IP) -> Option<Status> {
         Some(self.peers.get(ip)?.status().clone())
     }
 
