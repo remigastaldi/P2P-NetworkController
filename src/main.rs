@@ -133,6 +133,7 @@ async fn on_candidate_connection(ip: IP, stream: TcpStream, event_chan: Sender<P
             }
 
             if let Ok(event) = ConsensusEvent::from_u8(buff[0]) && event == ConsensusEvent::Handshake {
+                //TODO
             } else {
                 error!("[{}] handshake failed", ip);
                 event_chan.send(PeerEvent::Disconnected(ip)).await.unwrap();

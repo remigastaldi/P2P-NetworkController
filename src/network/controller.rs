@@ -132,6 +132,7 @@ impl NetworkController {
             loop {
                 sleep(Duration::from_secs(peers_file_dump_interval)).await;
 
+                //TODO: optimise this, no needs for reading again as the file is kept open
                 let mut content = String::new();
                 peers_file.rewind().unwrap();
                 peers_file.read_to_string(&mut content).unwrap();
@@ -159,7 +160,6 @@ impl NetworkController {
         let peers_controller = Arc::downgrade(&self.peers);
         let notifier_service = Arc::downgrade(&self.notifier);
         let tx = self.channel.0.clone();
-
 
         tokio::spawn(async move {
             loop {
@@ -198,7 +198,7 @@ impl NetworkController {
 
                 let Some(ip) = controller.lock().await.best_idle_peer_ip() else {
                     // error!("No best peer, SHOULD NOT HAPPENING");
-                    info!("No available peer");
+                    error!("No available peer");
 
                     sleep(Duration::from_secs(10)).await;
                     return;
@@ -222,10 +222,6 @@ impl NetworkController {
                         sleep(Duration::from_secs(3)).await;
                     }
                 }
-
-                // sleep(Duration::from_secs(1)).await;
-                // self.write_peers_to_file();
-                // info!("Write peers file");
             }
         });
     }
@@ -363,7 +359,7 @@ impl NetworkController {
         self.peers.lock().await.best_peers()
     }
 
-    pub async fn feedback_peer_list(&self, peer_ip: &Vec<IP>) {
+    pub async fn feedback_peer_list(&self, peer_ip: &[IP]) {
         //TODO: smart merge
     }
 }
