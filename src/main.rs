@@ -6,7 +6,7 @@ mod network;
 use std::error::Error;
 
 use network::IP;
-use tokio::{net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf}}, sync::{mpsc::{channel, Sender, Receiver}, oneshot}, io::AsyncWriteExt, time::Duration};
+use tokio::{net::{TcpStream, tcp::OwnedWriteHalf}, sync::{mpsc::{channel, Sender, Receiver}, oneshot}, io::AsyncWriteExt, time::Duration, signal};
 use tokio::io::AsyncReadExt;
 use tracing::{info, debug, error, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -227,6 +227,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     loop {
         tokio::select! {
+            _ = signal::ctrl_c() => {
+                //TODO shutdown properly
+                return Ok(());
+            },
             evt = rx.recv() => match evt {
                 Some(msg) => match msg {
                         PeerEvent::Alive(ip) => net.feedback_peer_alive(&ip).await.unwrap(),
