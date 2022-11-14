@@ -1,4 +1,4 @@
-use std::{fs::{File}, error::Error, sync::Arc, collections::HashMap, fmt::format};
+use std::{fs::File, error::Error, sync::Arc, collections::HashMap};
 use tokio::{net::{TcpStream, TcpListener}, sync::{mpsc::{Receiver, channel, Sender}, Notify}, join};
 use std::io::prelude::*;
 use crate::network::peer::Status;
@@ -6,7 +6,7 @@ use crate::network::peer::Status;
 use super::peer::{IP, PeerController};
 use tokio::time::{sleep, Duration};
 use tokio::sync::Mutex; 
-use tracing::{info, error, debug, Level, field::debug};
+use tracing::{info, error, debug};
 use local_ip_address::local_ip;
 
 #[derive(Eq, Hash, PartialEq)]
