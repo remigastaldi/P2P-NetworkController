@@ -6,8 +6,8 @@ mod network;
 use std::error::Error;
 
 use network::IP;
-use tokio::{net::{TcpStream, tcp::OwnedWriteHalf}, sync::{mpsc::{channel, Sender, Receiver}, oneshot}, io::AsyncWriteExt, time::Duration, signal};
-use tokio::io::AsyncReadExt;
+use tokio::{net::{TcpStream, tcp::OwnedWriteHalf}, sync::{mpsc::{channel, Sender, Receiver}, oneshot}, io::{AsyncWriteExt,AsyncReadExt}, time::Duration, signal};
+use tokio_util::sync::CancellationToken;
 use tracing::{info, debug, error, Level};
 use tracing_subscriber::FmtSubscriber;
 use std::mem;
@@ -39,7 +39,7 @@ impl ConsensusEvent {
             3 => ConsensusEvent::Misbehave,
             4 => ConsensusEvent::GetGoodIps,
             5 => ConsensusEvent::GoodIps,
-            _ => return Err(String::from("Unknow event"))
+            _ => return Err(String::from("Unknown event"))
         })
     }
 }
@@ -53,8 +53,6 @@ enum PeerEvent {
     GetGoodIps(oneshot::Sender<Vec<IP>>)
 }
 
-// struct WriteWrapper<T = ()>(std::marker::PhantomData<T>);
-// impl<T> WriteWrapper<T> {
 async fn write_event_to_stream<T>(stream: &mut OwnedWriteHalf, event: ConsensusEvent, payload: Option<T>) -> Result<(), String>
      where T: serde::Serialize 
 {
@@ -66,7 +64,7 @@ async fn write_event_to_stream<T>(stream: &mut OwnedWriteHalf, event: ConsensusE
             let payload_size_buff: [u8; U64SIZE] = (b_peers_ips.len() as u64).to_be_bytes();
             let mut buff = vec![0;  HEADER_SIZE + b_peers_ips.len()];
 
-            buff[1..U64SIZE + 1].copy_from_slice(&payload_size_buff);
+            buff[1..=U64SIZE].copy_from_slice(&payload_size_buff);
             buff[HEADER_SIZE..].copy_from_slice(b_peers_ips);
             buff    
         },
@@ -87,7 +85,7 @@ async fn on_peer_consensus_event(write: &mut OwnedWriteHalf, event_chan: &Sender
     match event {
         ConsensusEvent::Handshake => {
             event_chan.send(PeerEvent::Misbehave(ip.clone())).await.unwrap();
-            return Err(String::from("HANSDSHAKE already done"))
+            return Err(String::from("Handshake already done"))
         },
         ConsensusEvent::Alive => event_chan.send(PeerEvent::Alive(ip.clone())).await.unwrap(),
         ConsensusEvent::Misbehave => event_chan.send(PeerEvent::Misbehave(ip.clone())).await.unwrap(),
@@ -95,12 +93,12 @@ async fn on_peer_consensus_event(write: &mut OwnedWriteHalf, event_chan: &Sender
             let (tx, rx) = oneshot::channel();
             event_chan.send(PeerEvent::GetGoodIps(tx)).await.unwrap();
             let Ok(peers_ip) = rx.await else {
-                return Err(format!("[{}] Sender drop", ip))
+                return Err(format!("[{ip}] Sender drop"))
             };
 
             if let Err(err) = write_event_to_stream(write, ConsensusEvent::GoodIps, Some(peers_ip)).await {
                 event_chan.send(PeerEvent::Disconnected(ip.clone())).await.unwrap();
-                return Err(format!("[{}] {}", ip, err))
+                return Err(format!("[{ip}] {err}"))
             }
         }
         ConsensusEvent::GoodIps => {
@@ -116,8 +114,8 @@ async fn on_candidate_connection(ip: IP, stream: TcpStream, event_chan: Sender<P
     let (mut read, mut write) = stream.into_split();
 
     tokio::spawn(async move {
-        //TODO: Hansdshake with private / public key
-        //Hansdshake
+        //TODO: Handshake with private / public key
+        //Handshake
         let mut buff: [u8; U64SIZE + 1] = [0; U64SIZE + 1];
         if is_outgoing {
             if let Err(err) = write_event_to_stream::<()>(&mut write, ConsensusEvent::Handshake, None).await {
@@ -127,7 +125,7 @@ async fn on_candidate_connection(ip: IP, stream: TcpStream, event_chan: Sender<P
             }
         } else {
             if let Err(err) = read.read_exact(&mut buff).await {
-                error!("[{}] stream closed during hanshake {}", ip, err);
+                error!("[{}] stream closed during handshake {}", ip, err);
                 event_chan.send(PeerEvent::Disconnected(ip)).await.unwrap();
                 return;
             }
@@ -154,7 +152,7 @@ async fn on_candidate_connection(ip: IP, stream: TcpStream, event_chan: Sender<P
                         return;
                     }
                 },
-// change this, read_exact is not cancelable
+// change this, read_exact is not cancellable, CAN LEAD TO DATA LOSE
                 data = read.read_exact(&mut buff) => { 
                     if data.is_err() {
                         debug!("[{}] stream closed", ip);
@@ -184,7 +182,7 @@ async fn on_candidate_connection(ip: IP, stream: TcpStream, event_chan: Sender<P
                             return;
                         }
                     } else {
-                        error!("[{}] receive unknow event", ip);
+                        error!("[{}] receive unknown event", ip);
                         event_chan.send(PeerEvent::Misbehave(ip.clone())).await.unwrap();
                     }
                 }
@@ -195,6 +193,9 @@ async fn on_candidate_connection(ip: IP, stream: TcpStream, event_chan: Sender<P
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let shutdown_token = CancellationToken::new();
+    let shutdown_token_clone = shutdown_token.child_token();
+
     let subscriber = FmtSubscriber::builder()
         .with_max_level(Level::TRACE)
         .finish();
@@ -213,6 +214,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // max_banned_peers,
     // peer_file_dump_interval_seconds
     let mut net = network::controller::NetworkController::new(
+        shutdown_token_clone,
        "config/peers.json",
        4242,
        2,
@@ -225,11 +227,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     ).await?;
 
     let (tx, mut rx): (Sender<PeerEvent>, Receiver<PeerEvent>) = channel(4096);
-
     loop {
         tokio::select! {
             _ = signal::ctrl_c() => {
-                //TODO shutdown properly
+                debug!("Gracefully shutdown main loop");
+                shutdown_token.cancel(); 
                 return Ok(());
             },
             evt = rx.recv() => match evt {

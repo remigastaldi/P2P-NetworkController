@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
-use tracing::debug;
+use tracing::{info, debug};
 
 pub type IP = String;
 
@@ -43,9 +43,8 @@ impl Peer {
                 return Err(String::from("Peer banned"));
             }
             (Status::InAlive | Status::OutAlive, Status::InHandshaking) => return Err(String::from("Already connected")),
-            (Status::InHandshaking, Status::Idle) => self.last_failure = Some(Utc::now()),
+            (Status::InHandshaking, Status::Idle) | (_, Status::Banned) => self.last_failure = Some(Utc::now()),
             (_, Status::InAlive | Status::OutAlive) => self.last_alive = Some(Utc::now()),
-            (_, Status::Banned) => self.last_failure = Some(Utc::now()),
             (_,_) => { }
         } 
         let old = self.status;
@@ -83,45 +82,46 @@ impl PeerController {
 
     // Abstraction of Status struct
     pub fn on_peer_connect(&mut self, ip: &IP) -> Result<(), String> {
-        debug!("[{}] InHandshaking", ip);
+        info!("[{}] InHandshaking", ip);
         self.update_peer_status(ip, Status::InHandshaking)
     }
 
     pub fn on_peer_out_connecting(&mut self, ip: &IP) -> Result<(), String> {
-        debug!("[{}] OutConnecting", ip);
+        info!("[{}] OutConnecting", ip);
         self.update_peer_status(ip, Status::OutConnecting)
     }
 
     pub fn on_peer_out_handshaking(&mut self, ip: &IP) -> Result<(), String> {
-        debug!("[{}] OutHandshaking", ip);
+        info!("[{}] OutHandshaking", ip);
         self.update_peer_status(ip, Status::OutHandshaking)
     }
 
     pub fn on_peer_in_alive(&mut self, ip: &IP) -> Result<(), String> {
-        debug!("[{}] InAlive", ip);
+        info!("[{}] InAlive", ip);
         self.update_peer_status(ip, Status::InAlive)
     }
 
     pub fn on_peer_out_alive(&mut self, ip: &IP) -> Result<(), String> {
-        debug!("[{}] OutAlive", ip);
+        info!("[{}] OutAlive", ip);
         self.update_peer_status(ip, Status::OutAlive)
     }
 
     pub fn on_peer_failed(&mut self, ip: &IP) -> Result<(), String> {
-        debug!("[{}] Idle", ip);
+        info!("[{}] Idle", ip);
         self.update_peer_status(ip, Status::Idle)
     }
 
     pub fn feedback_peer_banned(&mut self, ip: &IP) -> Result<(), String> {
-        debug!("[{}] Banned", ip);
+        info!("[{}] Banned", ip);
         self.update_peer_status(ip, Status::Banned)
     }
 
     pub fn flag_as_local(&mut self, ip: &IP) { 
-        for peer in self.peers.iter_mut() {
+        for peer in &mut self.peers {
             if peer.0 == ip {
                 debug!("[{}] Is local ip", ip);
-                peer.1.set_status(Status::Local)    .unwrap();
+                peer.1.set_status(Status::Local).unwrap();
+                self.idle -= 1;
             }
         }
     }
@@ -166,7 +166,7 @@ impl PeerController {
 
     //TODO
     pub fn best_idle_peer_ip(&self) -> Option<IP> {
-        for peer in self.peers.iter() {
+        for peer in &self.peers {
             if peer.1.status() == &Status::Idle {
                 return Some(peer.0.clone())
             }
@@ -175,11 +175,7 @@ impl PeerController {
     }
 
     pub fn peer_status(&self, ip: &IP) -> Option<Status> {
-        Some(self.peers.get(ip)?.status().clone())
-    }
-
-    pub fn is_idle(&self, ip: &IP) -> Option<bool> {
-       Some(self.peers.get(ip)?.status() == &Status::Idle)
+        Some(*self.peers.get(ip)?.status())
     }
 
     pub fn peers_ip(&self) -> Vec<&IP> {
